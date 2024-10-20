@@ -4,10 +4,14 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 // networking
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+
 
 // static variables
 #define LISTENADDR "0.0.0.0"
@@ -106,7 +110,7 @@ void http_response(int c, char *con_type, char *data){
     char buf[512];
     int n;
     int con_len = strlen(data);
-    memset(buf, 0, 512);
+
     snprintf(buf, 511,
              "Content-Type: %s\r\n"
              "Content-Length: %d\r\n"
@@ -116,26 +120,79 @@ void http_response(int c, char *con_type, char *data){
     return;
 };
 
-int sendfile(int c, char *ctype, httpfile *file){
+httpfile *readfile(char *filename){
     char buf[512];
-    int n,x;
+    char *p;
+    int n, x, fd;
+    httpfile about_route*f;
 
-    if(!file){
+    fd = open(filename, O_RDONLY);
+    if(fd < 0){
         return 0;
     }
 
-    int con_len = strlen(data);
+    f = malloc(sizeof(httpfile));
+    if(!f){
+        close(fd);
+        return 0;
+    }
+
+    strncpy(f->filename, filename, 63);
+    f->fc = malloc(512);
+
+    x = 0;
+    while(1){
+        memset(buf, 0, 512);
+        n = read(fd, buf, 512);
+        if(!n){
+            break;
+        }else if(x == -1){
+            close(fd);
+            free(f->fc);
+            free(f);
+            return 0;
+        }
+        strncpy(buf, (f->fc)+x, n);
+        x += n;
+        f->fc = realloc(f->fc, (512+x));
+    }
+    f->size  = x;
+    close(fd);
+    return f;
+};
+
+// read file and write on the packets to send
+int sendfile(int c, char *ctype, httpfile *file){
+    char buf[512];
+    char *p;
+    int n,x;
+    if(!file){
+        return 0;
+    }
+    int clen = strlen(file->fc);
     memset(buf, 0, 512);
     snprintf(buf, 511,
              "Content-Type: %s\r\n"
-             "Content-Length: %d\r\n" ,con_type, con_len);
-
-    n = strlen(buf);
-    write(c, buf, n);
-    return;
+             "Content-Length: %d\r\n", ctype, clen);
+    n = file->size;
+    p = file->fc;
+    while(1){
+        x = write(c, p, (n < 512)?n:512);
+        if(x < 1){
+            return 0;
+        }
+        n -= x;
+        if(n < 1){
+            break;
+        }else{
+            p += x;
+        }
+        return 1;
+    };
+    return 0;
 };
 
-//void http_response(int c, char *str){ };
+// routes functions
 void home_route(int c, char *url){
     http_header(c, 200);
     http_response(c, "text/html", "<html><body>Hello Home</body></html>");
@@ -158,12 +215,16 @@ void not_found(int c, char *url){
 httproute routes[2] = {
     {"GET", "/home", home_route},
     {"GET", "/about", about_route},
+    {"GET", "/image", image_route},
 };
-
+/*
 void parse_url(char *method, char *url, int c, httproute routes[], int route_size){
     for(int i = 0; i < route_size; i++){
+        if(!strcmp(method, routes[i].method) && !strncmp(url, "/img/", 5)){
+            memset(str, 0, 96);
+            snprintf(".%s", 95, url);
+        }
         if(!strcmp(method, routes[i].method) && !strcmp(url, routes[i].url)){
-            printf("%s, %s\n", routes[i].method, routes[i].url );
             routes[i].callback(c, routes[i].url);
             return;
         }
@@ -171,6 +232,7 @@ void parse_url(char *method, char *url, int c, httproute routes[], int route_siz
     not_found(c, url);
     return;
 }
+*/
 
 char *cli_read(int c){
     static char buf[512];
@@ -187,6 +249,8 @@ char *cli_read(int c){
 void handle_cli_req(int s, int c){
     httpreq *req;
     char *p;
+    char str[96];
+    httpfile *file;
 
     p = cli_read(c);
     if(!p){
@@ -204,7 +268,27 @@ void handle_cli_req(int s, int c){
     }
 
     int routes_size = sizeof(routes) / sizeof(routes[0]);
-    parse_url(req->method, req->url, c, routes, routes_size);
+    for(int i = 0; i < routes_size; i++){
+        if(!strcmp(req->method, routes[i].method) && !strncmp(req->url, "/img/", 5)){
+            memset(str, 0, 96);
+            snprintf(str, 95,".%s", req->url);
+            file = readfile(req->url);
+            if(!file){
+                not_found(c, req->url);
+            }else{
+                http_header(c, 200);
+                if(!sendfile(c, "image/png", file)){
+                    http_header(c, 500);
+                    not_found(c, req->url);
+                }
+            }
+        }
+        if(!strcmp(req->method, routes[i].method) && !strcmp(req->url, routes[i].url)){
+            routes[i].callback(c, routes[i].url);
+            return;
+        }
+    }
+    not_found(c, req->url);
 
     free(req);
     close(c);
