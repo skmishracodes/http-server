@@ -40,8 +40,8 @@ int srv_init(char *server_addr, int port, char *error_msg){
 
 int client_accept(int s, char *error_msg){
     int client;
-    socklen_t addrlen = 0;
     struct sockaddr_in clt;
+    socklen_t addrlen = 0;
     memset(&clt, 0, sizeof(clt));
 
     client = accept(s, (struct sockaddr*)&clt, &addrlen);

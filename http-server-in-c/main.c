@@ -30,13 +30,18 @@ int main(int argc, char *argv[]){
 
     // creating while loop for constant connection
     while(1){
-        int c = client_accept(s, error_msg);
+        int *c = malloc(sizeof(int));
+        *c = client_accept(s, error_msg);
         if(!c){
             fprintf(stderr, "connection error: %s", error_msg);
             continue;
         }
-        handle_client_request(c);
+
+        pthread_t thread_id;
+        pthread_create(&thread_id, NULL, handle_client_request, (void *)c);
+        pthread_detach(thread_id);
     }
+    close(s);
     return 0;
 }
 
