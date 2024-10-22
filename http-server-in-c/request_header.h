@@ -19,7 +19,7 @@ struct req_mtd_url {
 struct route {
     char method[8];
     char url[256];
-    void (*callback)(void);
+    void (*callback)(int c);
 };
 
 char *mime_type(char *file_ext){
@@ -86,18 +86,39 @@ void handle_files(int client_fd, char *filename, size_t contentlen){
     return;
 }
 
-void handle_callback(int client_fd, struct route route){
-    route.callback();
+void handle_callback(int client_fd, struct route route, size_t content_len, char *filename){
+    route.callback(client_fd);
     close(client_fd);
     return;
 }
 
-void homeroute(){
-    printf("HOMEROUTE \n");
+void notfoundroute(int client_fd){
+    char *filename = "/not-found/404.html";
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s%s", PUBLIC_DIR, filename);
+    struct stat path_stat;
+    if(stat(filepath, &path_stat) == 0 && S_ISREG(path_stat.st_mode)){
+        handle_files(client_fd, filepath, path_stat.st_size);
+        return ;
+    }
+    return ;
+}
+
+void homeroute(int client_fd){
+    char *filename = "/home/home.html";
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "%s%s", PUBLIC_DIR, filename);
+    struct stat path_stat;
+    if(stat(filepath, &path_stat) == 0 && S_ISREG(path_stat.st_mode)){
+        handle_files(client_fd, filepath, path_stat.st_size);
+        return ;
+    }else{
+        notfoundroute(client_fd);
+    }
 }
 
 struct route routes[1] ={
-    {"GET", "/home", homeroute},
+    {"GET", "/about", homeroute},
 };
 
 // Handle routes and functions
@@ -112,10 +133,13 @@ void handle_route(int client_fd, struct req_mtd_url *req_params){
         int routelen = sizeof(routes) / sizeof(routes[0]);
         for (int i=0; i < routelen; i++){
             if(strcmp(routes[i].url, req_params->url) == 0 && strcmp(routes[i].method, req_params->method) == 0){
-                handle_callback(client_fd, routes[i]);
+                routes[i].callback(client_fd);
                 return ;
+            }else{
+                continue;
             }
         }
+        notfoundroute(client_fd);
     }
     close(client_fd);
     return ;
